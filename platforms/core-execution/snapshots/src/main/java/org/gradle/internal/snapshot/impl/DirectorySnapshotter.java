@@ -55,6 +55,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -438,6 +439,16 @@ public class DirectorySnapshotter {
         private FileSystemLeafSnapshot snapshotFile(Path absoluteFilePath, String internedName, BasicFileAttributes attrs, AccessType accessType) {
             String internedRemappedAbsoluteFilePath = intern(symbolicLinkMapping.remapAbsolutePath(absoluteFilePath));
             FileSystemLocationSnapshot previouslyKnownSnapshot = previouslyKnownSnapshots.get(internedRemappedAbsoluteFilePath);
+
+            boolean isWindowsReparse;
+            try {
+                String fileStoreType = Files.getFileStore(absoluteFilePath).type();
+                boolean isWindowsFs = Objects.equals(fileStoreType, "ReFS") || Objects.equals(fileStoreType, "NTFS");
+                isWindowsReparse = isWindowsFs && attrs.isOther();
+            } catch (IOException e) {
+                isWindowsReparse = false;
+            }
+
             if (previouslyKnownSnapshot != null) {
                 if (!(previouslyKnownSnapshot instanceof FileSystemLeafSnapshot)) {
                     throw new IllegalStateException("Expected a previously known leaf snapshot at " + internedRemappedAbsoluteFilePath + ", but found " + previouslyKnownSnapshot);
@@ -446,7 +457,7 @@ public class DirectorySnapshotter {
             }
             if (attrs.isSymbolicLink()) {
                 return new MissingFileSnapshot(internedRemappedAbsoluteFilePath, internedName, accessType);
-            } else if (!attrs.isRegularFile()) {
+            } else if (!attrs.isRegularFile() && !isWindowsReparse) {
                 throw new UncheckedIOException(new IOException(String.format("Cannot snapshot %s: not a regular file", internedRemappedAbsoluteFilePath)));
             }
             long lastModified = attrs.lastModifiedTime().toMillis();
